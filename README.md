@@ -11,6 +11,8 @@ Eine einzelne HTML-Datei (`index.html`) als leichte, offline-fähige Gitarren-Le
 - **Automatisch generierter Lernplan**: neue Akkorde einzeln lernen → wichtigste Wechsel im Metronomtempo üben → Abschnitte einzeln üben → ganzer Song → Feinschliff, verteilt auf mehrere Übungstage je nach Schwierigkeit
 - **Übungsmodus**: Metronom (Web Audio, präziser Lookahead-Scheduler) und Übungs-Stoppuhr je Song/Tag, Fortschritt wird gespeichert
 - **JSON-Import/-Export** der eigenen Songs zum Sichern/Teilen
+- **Spotify-Playlist als Songquelle & ähnliche-Songs-Vorschläge** (chatgestützt, siehe unten)
+- **"Songs, die ich kann"**: Songs lassen sich als gelernt markieren und wandern in eine eigene Sidebar-Gruppe; bereits bekannte Akkorde fließen danach in die Schwierigkeit *neuer* Songs mit ein (**persönliche Schwierigkeit in Klammern**, z. B. `62 (48)`) und der Lernplan überspringt Akkorde, die du schon kannst
 
 ## Wie kommt ein Song in die App?
 
@@ -50,6 +52,17 @@ Eine automatische Erkennung "Song rein, Griffe raus" per Audioanalyse ist mit ei
 
 Alle importierten Daten werden beim Speichern validiert (Zahlenbereiche, erlaubte Werte) – ungültige oder unerwartete Felder werden abgewiesen bzw. auf sichere Standardwerte zurückgesetzt.
 
+Ein bestehender Song lässt sich jederzeit über den Stift-Button (✎) in der Song-Ansicht erneut bearbeiten – auch ein per Spotify-Import angelegter Wartelisten-Eintrag wird darüber transkribiert.
+
+## Spotify-Integration
+
+Griffwerk hat bewusst keinen eigenen Server und kann sich daher nicht selbst bei Spotify anmelden (kein OAuth im Browser). Stattdessen läuft das über den Chat, wo Claude direkten Spotify-Zugriff hat:
+
+1. Im Chat z. B. bitten: *"Lies meine Spotify-Playlist [Name/Link] aus"* oder *"Schlag mir ähnliche Songs zu [Song] vor"*.
+2. Claude liefert eine JSON-Liste im Format `[{"title": "...", "artist": "...", "spotifyUrl": "...", "reason": "nur bei Vorschlägen"}]`.
+3. Über den Button "+ Von Spotify importieren" in der App einfügen – Ziel **Warteliste** (Songs, die als Nächstes gelernt werden sollen) oder **Vorschläge** (ähnliche Songs, über die noch nicht entschieden ist).
+4. Wartelisten-Einträge lassen sich per "Transkribieren" direkt in den Song-Editor übernehmen (Titel/Interpret/Spotify-Link sind schon vorausgefüllt); Vorschläge lassen sich per Klick in die Warteliste verschieben oder verwerfen.
+
 ## Nutzung
 
 1. `index.html` im Browser öffnen (lokal per Doppelklick oder über GitHub Pages gehostet).
@@ -58,7 +71,7 @@ Alle importierten Daten werden beim Speichern validiert (Zahlenbereiche, erlaubt
 
 ## Daten und Datenschutz
 
-Alle Daten (Songs, Lernfortschritt, Übungszeiten) liegen ausschließlich im `localStorage` des jeweiligen Geräts/Browsers. Es gibt keinen eigenen Server. Externe Verbindungen bestehen nur zu den fest eingebundenen CDN-Bibliotheken (Google Fonts, VexFlow für den Notensatz) – es werden keine Songdaten an Dritte gesendet.
+Alle Daten (Songs, Lernfortschritt, Übungszeiten, Warteliste, Vorschläge) liegen ausschließlich im `localStorage` des jeweiligen Geräts/Browsers. Es gibt keinen eigenen Server. Externe Verbindungen bestehen nur zu den fest eingebundenen CDN-Bibliotheken (Google Fonts, VexFlow für den Notensatz) – es werden keine Songdaten an Dritte gesendet. Die Spotify-Anbindung läuft ausschließlich über den Chat (siehe oben), nicht über eine direkte Verbindung der App selbst.
 
 ## Enthaltene Demo-Songs
 

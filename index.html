@@ -115,6 +115,24 @@
   .progress-track { flex: 1; height: 4px; background: var(--line); border-radius: 999px; margin-left: 10px; overflow: hidden; }
   .progress-fill { height: 100%; background: var(--good); }
 
+  .sidebar-group-label {
+    font-family: 'Fraunces', serif; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-soft); margin: 18px 0 8px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sidebar-group-label:first-child { margin-top: 0; }
+
+  .queue-card {
+    background: #fff; border: 1px dashed var(--line); border-radius: 4px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .queue-card .title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; }
+  .queue-card .artist { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .queue-card .reason { font-size: 12px; color: var(--accent); margin-top: 6px; font-style: italic; }
+  .queue-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
+  .queue-actions .export-btn { padding: 6px 12px; font-size: 12px; }
+
+  .diff-score .personal { font-size: 18px; color: var(--ink-soft); font-weight: 500; }
+
   .empty-state {
     text-align: center;
     color: var(--ink-soft);
@@ -321,6 +339,7 @@
   <div class="layout">
     <div class="sidebar">
       <button class="new-song-btn" id="new-song-btn">+ Neuer Song</button>
+      <button class="export-btn" id="spotify-import-btn" style="width:100%; margin-bottom:16px;">+ Von Spotify importieren</button>
       <div id="song-list"></div>
     </div>
     <div class="main-col" id="main-col"></div>
@@ -348,6 +367,8 @@ const NOTE_NAMES_SHARP = ['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'];
 
 const SONGS_KEY = 'griffwerk.songs.v1';
 const PROGRESS_KEY = 'griffwerk.progress.v1';
+const QUEUE_KEY = 'griffwerk.queue.v1';
+const SUGGESTIONS_KEY = 'griffwerk.suggestions.v1';
 
 /* Akkord-Bibliothek: Fretmuster tief->hoch (E A D G B e). 'x' = nicht gespielt, 0 = leer, n = Bund n. */
 const CHORD_LIBRARY = {
@@ -468,12 +489,25 @@ function sanitizeSongData(raw) {
   const timeSignature = [3, 4, 6].includes(Number(raw.timeSignature)) ? Number(raw.timeSignature) : 4;
 
   return {
-    id: uid(),
     title: String(raw.title).slice(0, 120),
     artist: String(raw.artist || '').slice(0, 120),
     notes: String(raw.notes || '').slice(0, 500),
+    spotifyUrl: String(raw.spotifyUrl || '').slice(0, 300),
     bpm, capo, timeSignature, tuning,
     progression,
+  };
+}
+
+function sanitizeStub(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.title !== 'string' || !raw.title.trim()) {
+    throw new Error('Jeder Eintrag braucht mindestens ein "title"-Feld.');
+  }
+  return {
+    id: uid(),
+    title: String(raw.title).slice(0, 120),
+    artist: String(raw.artist || '').slice(0, 120),
+    spotifyUrl: String(raw.spotifyUrl || '').slice(0, 300),
+    reason: String(raw.reason || '').slice(0, 200),
   };
 }
 
@@ -508,17 +542,39 @@ function progressFor(songId) {
   return progress[songId];
 }
 
+function loadQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
+}
+function saveQueue() { localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)); }
+
+function loadSuggestions() {
+  try { return JSON.parse(localStorage.getItem(SUGGESTIONS_KEY)) || []; } catch (e) { return []; }
+}
+function saveSuggestions() { localStorage.setItem(SUGGESTIONS_KEY, JSON.stringify(suggestions)); }
+
+function knownChordShapes() {
+  const set = new Set();
+  songs.filter(s => s.mastered).forEach(s => (s.progression || []).forEach(e => set.add(shapeKey(e.shape))));
+  return set;
+}
+
+function formatScore(diff) {
+  if (diff.personalScore == null || diff.personalScore === diff.score) return String(diff.score);
+  return `${diff.score} (${diff.personalScore})`;
+}
+
 /* ===================== Schwierigkeitsbewertung (0-100, erklärbar) ===================== */
 
-function computeDifficulty(song) {
+function computeDifficulty(song, knownSet) {
   const prog = song.progression || [];
-  if (!prog.length) return { score: 0, label: 'Keine Daten', color: '#999', breakdown: [] };
+  if (!prog.length) return { score: 0, personalScore: null, label: 'Keine Daten', color: '#999', breakdown: [] };
 
   const shapesSeen = new Map(); // key -> {shape, hardness info, count, beats}
   let totalBeats = 0;
   let transitions = 0;
   let prevKey = null;
   let barreOrHardBeats = 0;
+  let personalBarreOrHardBeats = 0;
   let techniqueScoreRaw = 0;
   const durationsUsed = new Set();
   let nonIntegerBeats = 0;
@@ -533,7 +589,10 @@ function computeDifficulty(song) {
     if (!shapesSeen.has(key)) shapesSeen.set(key, { info, count: 0 });
     shapesSeen.get(key).count++;
 
-    if (info.isBarre || info.spread >= 3) barreOrHardBeats += entry.beats;
+    if (info.isBarre || info.spread >= 3) {
+      barreOrHardBeats += entry.beats;
+      personalBarreOrHardBeats += (knownSet && knownSet.has(key)) ? entry.beats * 0.3 : entry.beats;
+    }
 
     if (prevKey !== null && prevKey !== key) transitions++;
     prevKey = key;
@@ -543,10 +602,14 @@ function computeDifficulty(song) {
     else if (['palm-mute', 'zupfen'].includes(t)) techniqueScoreRaw += 0.6;
   });
 
-  // 1) Akkordvielfalt (0-20)
-  let hardnessSum = 0;
-  shapesSeen.forEach(v => hardnessSum += v.info.hardness);
+  // 1) Akkordvielfalt (0-20) – bereits bekannte Griffe zählen für dich persönlich weniger
+  let hardnessSum = 0, personalHardnessSum = 0;
+  shapesSeen.forEach((v, key) => {
+    hardnessSum += v.info.hardness;
+    personalHardnessSum += (knownSet && knownSet.has(key)) ? v.info.hardness * 0.25 : v.info.hardness;
+  });
   const chordScore = clamp(Math.round(hardnessSum * 1.8), 0, 20);
+  const personalChordScore = clamp(Math.round(personalHardnessSum * 1.8), 0, 20);
 
   // 2) Wechselgeschwindigkeit (0-20)
   const minutes = Math.max(totalBeats / Math.max(song.bpm || 100, 1), 0.05);
@@ -556,6 +619,8 @@ function computeDifficulty(song) {
   // 3) Barré-/Stretch-Anteil (0-15)
   const barreFraction = totalBeats > 0 ? barreOrHardBeats / totalBeats : 0;
   const barreScore = clamp(Math.round(barreFraction * 15), 0, 15);
+  const personalBarreFraction = totalBeats > 0 ? personalBarreOrHardBeats / totalBeats : 0;
+  const personalBarreScore = clamp(Math.round(personalBarreFraction * 15), 0, 15);
 
   // 4) Techniken (0-15)
   const techScore = clamp(Math.round(techniqueScoreRaw), 0, 15);
@@ -571,6 +636,9 @@ function computeDifficulty(song) {
   const lengthScore = clamp(Math.round(totalBeats / 16), 0, 5);
 
   const total = clamp(chordScore + speedScore + barreScore + techScore + rhythmScore + tempoScore + lengthScore, 0, 100);
+  const personalTotal = (knownSet && knownSet.size)
+    ? clamp(personalChordScore + speedScore + personalBarreScore + techScore + rhythmScore + tempoScore + lengthScore, 0, 100)
+    : null;
 
   let label, color;
   if (total <= 20) { label = 'Anfänger'; color = 'var(--good)'; }
@@ -580,7 +648,7 @@ function computeDifficulty(song) {
   else { label = 'Experte'; color = 'var(--hard)'; }
 
   return {
-    score: total, label, color,
+    score: total, personalScore: personalTotal, label, color,
     distinctChords: shapesSeen.size,
     transitions, changesPerMinute: round1(changesPerMinute),
     breakdown: [
@@ -632,7 +700,7 @@ function topTransitions(prog, limit) {
   return [...map.values()].sort((x, y) => (y.count - x.count) || (y.hardness - x.hardness)).slice(0, limit);
 }
 
-function buildLearningPlan(song, diff) {
+function buildLearningPlan(song, diff, knownSet) {
   const prog = song.progression || [];
   if (!prog.length) return [];
   const bpm = song.bpm || 100;
@@ -643,6 +711,7 @@ function buildLearningPlan(song, diff) {
   const tasks = [];
 
   chords.forEach(c => {
+    if (knownSet && knownSet.has(shapeKey(c.shape))) return; // aus einem bereits gelernten Song bekannt
     tasks.push({ text: `Neuen Akkord sauber greifen: ${c.chord}`, minutes: 5, chords: [c], kind: 'chord' });
   });
 
@@ -665,7 +734,8 @@ function buildLearningPlan(song, diff) {
   tasks.push({ text: `Song komplett von Anfang bis Ende spielen, mehrere Durchläufe`, minutes: 10, chords: [], targetBpm: bpm, kind: 'full' });
   tasks.push({ text: `Feinschliff: Übergänge glätten, Dynamik, ggf. zur Aufnahme mitspielen`, minutes: 8, chords: [], targetBpm: bpm, kind: 'polish' });
 
-  const totalDays = clamp(Math.round(3 + diff.score / 9), 3, 14);
+  const effectiveScore = diff.personalScore != null ? diff.personalScore : diff.score;
+  const totalDays = clamp(Math.round(3 + effectiveScore / 9), 3, 14);
   const days = [];
   let dayTasks = [], dayMinutes = 0, dayIdx = 1;
   const targetPerDay = 25;
@@ -799,6 +869,9 @@ function renderNotation(container, song) {
 
 let songs = loadSongs();
 let progress = loadProgress();
+let queue = loadQueue();
+let suggestions = loadSuggestions();
+let knownChordSet = new Set();
 let currentSongId = songs[0] ? songs[0].id : null;
 let currentTab = 'overview';
 let practicePlan = null; // gecachter Lernplan fuer aktuellen Song
@@ -858,28 +931,96 @@ function demoExerciseRiff() {
 
 /* ===================== Rendering: Song-Liste ===================== */
 
+function songCardHtml(s) {
+  const diff = computeDifficulty(s, knownChordSet);
+  const plan = buildLearningPlan(s, diff, knownChordSet);
+  const pr = progressFor(s.id);
+  const totalTasks = plan.reduce((a, d) => a + d.tasks.length, 0);
+  const doneTasks = Object.keys(pr.doneTasks).filter(k => k.startsWith(s.id + ':') && pr.doneTasks[k]).length;
+  const pct = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  return `<div class="song-card ${s.id === currentSongId ? 'selected' : ''}" data-id="${s.id}">
+    <div class="title">${escapeHtml(s.title)}</div>
+    <div class="artist">${escapeHtml(s.artist || '')}</div>
+    <div class="meta-row">
+      <span class="badge" style="background:${diff.color}">${formatScore(diff)}</span>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+    </div>
+  </div>`;
+}
+
+function renderSuggestionsPanel() {
+  if (!suggestions.length) return '';
+  return `<div class="sidebar-group-label">Vorschläge (ähnliche Songs)</div>` +
+    suggestions.map(s => `
+      <div class="queue-card" data-id="${s.id}">
+        <div class="title">${escapeHtml(s.title)}</div>
+        <div class="artist">${escapeHtml(s.artist || '')}</div>
+        ${s.reason ? `<div class="reason">${escapeHtml(s.reason)}</div>` : ''}
+        <div class="queue-actions">
+          <button class="export-btn sugg-add" data-id="${s.id}">+ Warteliste</button>
+          <button class="icon-btn sugg-dismiss" data-id="${s.id}" title="Verwerfen">✕</button>
+        </div>
+      </div>
+    `).join('');
+}
+
+function renderQueuePanel() {
+  if (!queue.length) return '';
+  return `<div class="sidebar-group-label">Warteliste (aus Spotify)</div>` +
+    queue.map(q => `
+      <div class="queue-card" data-id="${q.id}">
+        <div class="title">${escapeHtml(q.title)}</div>
+        <div class="artist">${escapeHtml(q.artist || '')}</div>
+        <div class="queue-actions">
+          <button class="export-btn q-transcribe" data-id="${q.id}">Transkribieren</button>
+          <button class="icon-btn q-remove" data-id="${q.id}" title="Entfernen">✕</button>
+        </div>
+      </div>
+    `).join('');
+}
+
 function renderSongList() {
   const el = document.getElementById('song-list');
-  if (!songs.length) { el.innerHTML = '<div class="empty-state">Noch keine Songs. Leg oben deinen ersten an.</div>'; return; }
-  el.innerHTML = songs.map(s => {
-    const diff = computeDifficulty(s);
-    const plan = buildLearningPlan(s, diff);
-    const pr = progressFor(s.id);
-    const totalTasks = plan.reduce((a, d) => a + d.tasks.length, 0);
-    const doneTasks = Object.keys(pr.doneTasks).filter(k => k.startsWith(s.id + ':') && pr.doneTasks[k]).length;
-    const pct = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
-    return `<div class="song-card ${s.id === currentSongId ? 'selected' : ''}" data-id="${s.id}">
-      <div class="title">${escapeHtml(s.title)}</div>
-      <div class="artist">${escapeHtml(s.artist || '')}</div>
-      <div class="meta-row">
-        <span class="badge" style="background:${diff.color}">${diff.score}</span>
-        <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-      </div>
-    </div>`;
-  }).join('');
+  const learning = songs.filter(s => !s.mastered);
+  const mastered = songs.filter(s => s.mastered);
+  const group = (title, list) => list.length ? `<div class="sidebar-group-label">${title}</div>${list.map(songCardHtml).join('')}` : '';
+
+  let html = '';
+  html += renderSuggestionsPanel();
+  html += renderQueuePanel();
+  if (!songs.length && !queue.length && !suggestions.length) {
+    html = '<div class="empty-state">Noch keine Songs. Leg oben deinen ersten an oder importiere eine Spotify-Playlist.</div>';
+  } else {
+    html += group('Am Lernen', learning);
+    html += group('Kann ich', mastered);
+  }
+  el.innerHTML = html;
+
   el.querySelectorAll('.song-card').forEach(card => {
     card.addEventListener('click', () => { currentSongId = card.dataset.id; currentTab = 'overview'; renderAll(); });
   });
+  el.querySelectorAll('.q-transcribe').forEach(btn => btn.addEventListener('click', () => {
+    const q = queue.find(x => x.id === btn.dataset.id);
+    if (q) openEditor({ title: q.title, artist: q.artist, spotifyUrl: q.spotifyUrl, fromQueueId: q.id });
+  }));
+  el.querySelectorAll('.q-remove').forEach(btn => btn.addEventListener('click', () => {
+    queue = queue.filter(x => x.id !== btn.dataset.id);
+    saveQueue();
+    renderAll();
+  }));
+  el.querySelectorAll('.sugg-add').forEach(btn => btn.addEventListener('click', () => {
+    const s = suggestions.find(x => x.id === btn.dataset.id);
+    if (!s) return;
+    queue.push({ id: uid(), title: s.title, artist: s.artist, spotifyUrl: s.spotifyUrl });
+    suggestions = suggestions.filter(x => x.id !== s.id);
+    saveQueue(); saveSuggestions();
+    renderAll();
+  }));
+  el.querySelectorAll('.sugg-dismiss').forEach(btn => btn.addEventListener('click', () => {
+    suggestions = suggestions.filter(x => x.id !== btn.dataset.id);
+    saveSuggestions();
+    renderAll();
+  }));
 }
 
 /* ===================== Rendering: Hauptbereich ===================== */
@@ -893,7 +1034,7 @@ function renderMain() {
     main.innerHTML = '<div class="empty-state">Wähle links einen Song aus oder lege einen neuen an, um Griffbilder, Noten, Schwierigkeit und Lernplan zu sehen.</div>';
     return;
   }
-  const diff = computeDifficulty(song);
+  const diff = computeDifficulty(song, knownChordSet);
   const tabs = [
     ['overview', 'Übersicht'], ['chords', 'Akkorde & Griffbild'], ['notation', 'Noten'],
     ['plan', 'Lernplan'], ['practice', 'Üben'],
@@ -905,9 +1046,13 @@ function renderMain() {
         <div>
           <h2>${escapeHtml(song.title)}</h2>
           <div class="artist">${escapeHtml(song.artist || '')}</div>
-          <div class="song-meta-line">${song.bpm} BPM · Takt ${song.timeSignature || 4}/4 · Capo ${song.capo || 0} · ${TUNINGS[song.tuning || 'standard'].label}</div>
+          <div class="song-meta-line">${song.bpm} BPM · Takt ${song.timeSignature || 4}/4 · Capo ${song.capo || 0} · ${TUNINGS[song.tuning || 'standard'].label}${song.spotifyUrl ? ` · <a href="${escapeHtml(song.spotifyUrl)}" target="_blank" rel="noopener">Auf Spotify öffnen</a>` : ''}</div>
         </div>
-        <button class="icon-btn" id="delete-song-btn" title="Song löschen">✕ Löschen</button>
+        <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap;">
+          <button class="export-btn ${song.mastered ? '' : 'primary'}" id="mastered-toggle-btn">${song.mastered ? '↺ Zurück zu „Am Lernen"' : '✓ Als gelernt markieren'}</button>
+          <button class="icon-btn" id="edit-song-btn" title="Bearbeiten">✎</button>
+          <button class="icon-btn" id="delete-song-btn" title="Song löschen">✕</button>
+        </div>
       </div>
       <div class="tabbar" id="tabbar">
         ${tabs.map(([k, l]) => `<button class="tab-btn ${currentTab === k ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('')}
@@ -925,11 +1070,22 @@ function renderMain() {
     renderAll();
   });
 
+  document.getElementById('edit-song-btn').addEventListener('click', () => openEditor({ existingSong: song }));
+  document.getElementById('mastered-toggle-btn').addEventListener('click', () => toggleMastered(song.id));
+
   document.querySelectorAll('#tabbar .tab-btn').forEach(b => {
     b.addEventListener('click', () => { currentTab = b.dataset.tab; renderTabContent(song, diff); });
   });
 
   renderTabContent(song, diff);
+}
+
+function toggleMastered(songId) {
+  const s = songs.find(x => x.id === songId);
+  if (!s) return;
+  s.mastered = !s.mastered;
+  saveSongs();
+  renderAll();
 }
 
 function renderTabContent(song, diff) {
@@ -945,15 +1101,17 @@ function renderTabContent(song, diff) {
 function renderOverviewTab(el, song, diff) {
   const totalBeats = (song.progression || []).reduce((a, e) => a + e.beats, 0);
   const measures = Math.ceil(totalBeats / (song.timeSignature || 4));
-  const plan = buildLearningPlan(song, diff);
+  const plan = buildLearningPlan(song, diff, knownChordSet);
+  const showsPersonal = diff.personalScore != null && diff.personalScore !== diff.score;
   el.innerHTML = `
     <div class="diff-row">
-      <div class="diff-score" style="color:${diff.color}">${diff.score}</div>
+      <div class="diff-score" style="color:${diff.color}">${diff.score}${showsPersonal ? ` <span class="personal">(${diff.personalScore})</span>` : ''}</div>
       <div style="flex:1">
         <div class="diff-label" style="color:${diff.color}">${diff.label}</div>
         <div class="diff-gauge-track"><div class="diff-gauge-fill" style="width:${diff.score}%; background:${diff.color}"></div></div>
       </div>
     </div>
+    ${showsPersonal ? `<div class="note">Die Zahl in Klammern ist deine persönliche Schwierigkeit: Akkorde, die du aus bereits gelernten Songs kennst, zählen für dich weniger schwer.</div>` : ''}
     <div class="diff-breakdown">
       ${diff.breakdown.map(b => `
         <div class="diff-bd-row">
@@ -963,7 +1121,7 @@ function renderOverviewTab(el, song, diff) {
         </div>`).join('')}
     </div>
     <details class="info"><summary>Wie wird die Schwierigkeit berechnet?</summary>
-      <div class="note">Die sieben Faktoren oben werden aus deiner Song-Transkription automatisch berechnet: Akkordvielfalt & Schwierigkeit der Griffe, Wechselgeschwindigkeit (Wechsel pro Minute bei diesem Tempo), Anteil an Barré-/Stretch-Griffen, verwendete Spieltechniken, rhythmische Komplexität, Grundtempo und Songlänge. Die Punkte werden addiert und auf 0–100 begrenzt.</div>
+      <div class="note">Die sieben Faktoren oben werden aus deiner Song-Transkription automatisch berechnet: Akkordvielfalt & Schwierigkeit der Griffe, Wechselgeschwindigkeit (Wechsel pro Minute bei diesem Tempo), Anteil an Barré-/Stretch-Griffen, verwendete Spieltechniken, rhythmische Komplexität, Grundtempo und Songlänge. Die Punkte werden addiert und auf 0–100 begrenzt. Sobald du mindestens einen Song als "gelernt" markiert hast, wird zusätzlich deine persönliche Schwierigkeit in Klammern angezeigt – bereits bekannte Akkorde fließen dort mit reduziertem Gewicht in Akkordvielfalt und Barré/Stretch ein.</div>
     </details>
     <div class="stat-grid">
       <div class="stat-box"><div class="n">${diff.distinctChords}</div><div class="l">Akkorde/Griffe</div></div>
@@ -997,10 +1155,17 @@ function renderNotationTab(el, song) {
 }
 
 function renderPlanTab(el, song, diff) {
-  const plan = buildLearningPlan(song, diff);
+  const plan = buildLearningPlan(song, diff, knownChordSet);
   const pr = progressFor(song.id);
+  const totalTasks = plan.reduce((a, d) => a + d.tasks.length, 0);
+  const doneTasks = Object.keys(pr.doneTasks).filter(k => k.startsWith(song.id + ':') && pr.doneTasks[k]).length;
+  const allDone = totalTasks > 0 && doneTasks === totalTasks;
   el.innerHTML = `
-    <div class="note" style="margin-bottom:14px;">Automatisch erzeugter Lernplan auf Basis der Akkorde, Wechsel und Abschnitte dieses Songs – abgestimmt auf die Schwierigkeit (${diff.score}/100 → ${plan.length} Übungstage à ca. ${plan[0] ? plan[0].minutes : 20} Min).</div>
+    <div class="note" style="margin-bottom:14px;">Automatisch erzeugter Lernplan auf Basis der Akkorde, Wechsel und Abschnitte dieses Songs – abgestimmt auf die Schwierigkeit (${formatScore(diff)}/100 → ${plan.length} Übungstage à ca. ${plan[0] ? plan[0].minutes : 20} Min).</div>
+    ${allDone && !song.mastered ? `<div class="note" style="background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:12px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <span>Alle Aufgaben erledigt – kannst du den Song schon durchspielen?</span>
+      <button class="export-btn primary" id="plan-mark-mastered-btn">✓ Als gelernt markieren</button>
+    </div>` : ''}
     ${plan.map((day, di) => `
       <div class="plan-day">
         <div class="plan-day-head">
@@ -1024,12 +1189,15 @@ function renderPlanTab(el, song, diff) {
       saveProgress();
       renderSongList();
       cb.closest('.plan-task').classList.toggle('done', cb.checked);
+      renderPlanTab(el, song, diff);
     });
   });
+  const markBtn = document.getElementById('plan-mark-mastered-btn');
+  if (markBtn) markBtn.addEventListener('click', () => toggleMastered(song.id));
 }
 
 function renderPracticeTab(el, song, diff) {
-  const plan = buildLearningPlan(song, diff);
+  const plan = buildLearningPlan(song, diff, knownChordSet);
   if (!plan.length) { el.innerHTML = '<div class="note">Dieser Song hat noch keine Akkordfolge – im Editor ergänzen.</div>'; return; }
   if (practiceDayIdx >= plan.length) practiceDayIdx = 0;
   const day = plan[practiceDayIdx];
@@ -1182,8 +1350,34 @@ function updateStopwatchDisplay() {
 
 let editorState = { mode: 'json', entries: [] };
 
-function openEditor() {
-  editorState = { mode: 'manual', entries: [] };
+function openEditor(prefill) {
+  editorState = {
+    mode: 'manual', entries: [],
+    editingId: null, fromQueueId: null, jsonSeed: '',
+    prefillTitle: '', prefillArtist: '', prefillSpotifyUrl: '',
+    prefillBpm: 100, prefillCapo: 0, prefillTimeSignature: 4, prefillTuning: 'standard',
+  };
+  if (prefill && prefill.existingSong) {
+    const s = prefill.existingSong;
+    editorState.editingId = s.id;
+    editorState.mode = 'json';
+    editorState.entries = (s.progression || []).map(e => ({ ...e, shape: [...e.shape] }));
+    editorState.prefillTitle = s.title;
+    editorState.prefillArtist = s.artist || '';
+    editorState.prefillSpotifyUrl = s.spotifyUrl || '';
+    editorState.prefillBpm = s.bpm;
+    editorState.prefillCapo = s.capo;
+    editorState.prefillTimeSignature = s.timeSignature;
+    editorState.prefillTuning = s.tuning;
+    const seed = { ...s };
+    delete seed.id; delete seed.mastered;
+    editorState.jsonSeed = JSON.stringify(seed, null, 2);
+  } else if (prefill) {
+    editorState.prefillTitle = prefill.title || '';
+    editorState.prefillArtist = prefill.artist || '';
+    editorState.prefillSpotifyUrl = prefill.spotifyUrl || '';
+    editorState.fromQueueId = prefill.fromQueueId || null;
+  }
   renderEditorModal();
 }
 
@@ -1192,7 +1386,7 @@ function renderEditorModal() {
   root.innerHTML = `
     <div class="modal-backdrop" id="modal-backdrop">
       <div class="modal">
-        <h3>Neuen Song anlegen</h3>
+        <h3>${editorState.editingId ? 'Song bearbeiten' : 'Neuen Song anlegen'}</h3>
         <div class="note">Am schnellsten: bitte im Chat Claude, dir den Song als Griffwerk-JSON zu transkribieren, und füge es unten unter "JSON importieren" ein. Alternativ Akkord für Akkord manuell aufbauen.</div>
         <div class="modal-tabs">
           <button class="export-btn ${editorState.mode === 'manual' ? 'primary' : ''}" id="mode-manual">Manuell anlegen</button>
@@ -1228,7 +1422,7 @@ function renderJsonEditor() {
   body.innerHTML = `
     <div class="field">
       <span>Song-JSON (Schema siehe README)</span>
-      <textarea id="json-input" rows="14" placeholder="Hier JSON einfügen …"></textarea>
+      <textarea id="json-input" rows="14" placeholder="Hier JSON einfügen …">${escapeHtml(editorState.jsonSeed || '')}</textarea>
     </div>
     <div class="note"><button class="export-btn" id="load-example" style="margin-top:6px;">Beispiel-Schema laden</button></div>
   `;
@@ -1241,16 +1435,21 @@ function renderManualEditor() {
   const body = document.getElementById('editor-body');
   body.innerHTML = `
     <div class="field-grid">
-      <div class="field"><span>Titel</span><input id="f-title"></div>
-      <div class="field"><span>Interpret</span><input id="f-artist"></div>
-      <div class="field"><span>Tempo (BPM)</span><input id="f-bpm" type="number" value="100"></div>
-      <div class="field"><span>Capo</span><input id="f-capo" type="number" value="0"></div>
+      <div class="field"><span>Titel</span><input id="f-title" value="${escapeHtml(editorState.prefillTitle)}"></div>
+      <div class="field"><span>Interpret</span><input id="f-artist" value="${escapeHtml(editorState.prefillArtist)}"></div>
+      <div class="field"><span>Tempo (BPM)</span><input id="f-bpm" type="number" value="${editorState.prefillBpm}"></div>
+      <div class="field"><span>Capo</span><input id="f-capo" type="number" value="${editorState.prefillCapo}"></div>
       <div class="field"><span>Takt</span>
-        <select id="f-time"><option value="4">4/4</option><option value="3">3/4</option><option value="6">6/8 (als 6/4 geschrieben)</option></select>
+        <select id="f-time">
+          <option value="4" ${editorState.prefillTimeSignature == 4 ? 'selected' : ''}>4/4</option>
+          <option value="3" ${editorState.prefillTimeSignature == 3 ? 'selected' : ''}>3/4</option>
+          <option value="6" ${editorState.prefillTimeSignature == 6 ? 'selected' : ''}>6/8 (als 6/4 geschrieben)</option>
+        </select>
       </div>
       <div class="field"><span>Stimmung</span>
-        <select id="f-tuning">${Object.entries(TUNINGS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select>
+        <select id="f-tuning">${Object.entries(TUNINGS).map(([k, v]) => `<option value="${k}" ${k === editorState.prefillTuning ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
       </div>
+      <div class="field"><span>Spotify-Link (optional)</span><input id="f-spotify" value="${escapeHtml(editorState.prefillSpotifyUrl)}" placeholder="https://open.spotify.com/track/..."></div>
     </div>
     <div class="section-label" style="margin-top:0;">Akkordfolge</div>
     <div class="prog-row prog-head">
@@ -1324,12 +1523,27 @@ function saveFromEditor() {
       capo: document.getElementById('f-capo').value,
       timeSignature: document.getElementById('f-time').value,
       tuning: document.getElementById('f-tuning').value,
+      spotifyUrl: document.getElementById('f-spotify').value.trim(),
       progression: editorState.entries,
     };
   }
   let song;
   try { song = sanitizeSongData(raw); } catch (e) { return alert(e.message); }
-  songs.push(song);
+
+  if (editorState.editingId) {
+    const idx = songs.findIndex(s => s.id === editorState.editingId);
+    song.id = editorState.editingId;
+    song.mastered = idx !== -1 ? !!songs[idx].mastered : false;
+    if (idx !== -1) songs[idx] = song; else songs.push(song);
+  } else {
+    song.id = uid();
+    song.mastered = false;
+    songs.push(song);
+    if (editorState.fromQueueId) {
+      queue = queue.filter(q => q.id !== editorState.fromQueueId);
+      saveQueue();
+    }
+  }
   saveSongs();
   currentSongId = song.id;
   currentTab = 'overview';
@@ -1337,10 +1551,62 @@ function saveFromEditor() {
   renderAll();
 }
 
+/* ===================== Spotify-Import (Warteliste & Vorschläge) ===================== */
+
+function openSpotifyImport() {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-backdrop" id="spotify-backdrop">
+      <div class="modal">
+        <h3>Von Spotify importieren</h3>
+        <div class="note">Griffwerk hat keinen eigenen Server und kann sich daher nicht selbst bei Spotify anmelden. Bitte Claude im Chat z. B.: "Lies meine Spotify-Playlist [Name/Link] aus" oder "Schlag mir ähnliche Songs zu [Song] vor" – das Ergebnis hier als JSON-Liste einfügen.</div>
+        <div class="field" style="margin-top:12px;">
+          <span>Ziel</span>
+          <select id="spotify-target">
+            <option value="queue">Warteliste (Songs, die ich als Nächstes lernen will)</option>
+            <option value="suggestions">Vorschläge (ähnliche Songs, noch nicht entschieden)</option>
+          </select>
+        </div>
+        <div class="field" style="margin-top:10px;">
+          <span>JSON-Liste</span>
+          <textarea id="spotify-json" rows="10" placeholder='[{"title":"...","artist":"...","spotifyUrl":"...","reason":"nur bei Vorschlägen"}]'></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="export-btn" id="spotify-cancel">Abbrechen</button>
+          <button class="export-btn primary" id="spotify-save">Übernehmen</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('spotify-cancel').addEventListener('click', closeEditor);
+  document.getElementById('spotify-backdrop').addEventListener('click', e => { if (e.target.id === 'spotify-backdrop') closeEditor(); });
+  document.getElementById('spotify-save').addEventListener('click', saveSpotifyImport);
+}
+
+function saveSpotifyImport() {
+  const target = document.getElementById('spotify-target').value;
+  const text = document.getElementById('spotify-json').value.trim();
+  if (!text) return alert('Bitte JSON-Liste einfügen.');
+  let arr;
+  try { arr = JSON.parse(text); } catch (e) { return alert('Ungültiges JSON: ' + e.message); }
+  if (!Array.isArray(arr) || !arr.length) return alert('Erwarte eine JSON-Liste mit mindestens einem Eintrag.');
+  let stubs;
+  try { stubs = arr.map(sanitizeStub); } catch (e) { return alert(e.message); }
+  if (target === 'queue') {
+    queue = queue.concat(stubs);
+    saveQueue();
+  } else {
+    suggestions = suggestions.concat(stubs);
+    saveSuggestions();
+  }
+  closeEditor();
+  renderAll();
+}
+
 /* ===================== Export / Import ===================== */
 
 function exportAll() {
-  const blob = new Blob([JSON.stringify({ songs, progress }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ songs, progress, queue, suggestions }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'griffwerk-export.json';
@@ -1350,11 +1616,13 @@ function exportAll() {
 /* ===================== Init ===================== */
 
 function renderAll() {
+  knownChordSet = knownChordShapes();
   renderSongList();
   renderMain();
 }
 
-document.getElementById('new-song-btn').addEventListener('click', openEditor);
+document.getElementById('new-song-btn').addEventListener('click', () => openEditor());
+document.getElementById('spotify-import-btn').addEventListener('click', openSpotifyImport);
 
 seedDemoIfEmpty();
 renderAll();
