@@ -1832,11 +1832,30 @@ async function autoImportSpotifySuggestions() {
     let stub;
     try { stub = sanitizeStub(raw); } catch (e) { return; }
     stub.id = String(raw.id); // stabile ID statt zufaelliger uid(), damit ein erneuter Abruf nicht doppelt einfuegt
-    queue.push(stub);
+    // Landet bewusst nur in den Vorschlaegen, nie direkt in der Warteliste -
+    // der Nutzer entscheidet selbst, was er uebernimmt (kein unkontrolliertes "Reinrutschen").
+    suggestions.push(stub);
     added = true;
   });
   saveSeenSpotifyIds(seen);
-  if (added) { saveQueue(); renderAll(); }
+  if (added) { saveSuggestions(); renderAll(); }
+}
+
+// Einmalige Korrektur: eine fruehere Version legte automatisch erkannte Songs faelschlich
+// direkt in die Warteliste statt in die Vorschlaege (siehe Bugfix). Verschiebt betroffene
+// Eintraege (erkennbar an der "manual:"-ID aus dem automatischen Import) nachtraeglich in
+// die Vorschlaege, damit nichts rueckwirkend unkontrolliert in der Warteliste bleibt.
+const MIGRATION_FLAG_KEY = 'griffwerk.migratedAutoQueueFix.v1';
+function migrateAutoImportedQueueItems() {
+  if (localStorage.getItem(MIGRATION_FLAG_KEY)) return;
+  const misplaced = queue.filter(q => q.id.startsWith('manual:') || q.id.startsWith('spotify:track:'));
+  if (misplaced.length) {
+    queue = queue.filter(q => !misplaced.includes(q));
+    suggestions = suggestions.concat(misplaced);
+    saveQueue();
+    saveSuggestions();
+  }
+  localStorage.setItem(MIGRATION_FLAG_KEY, '1');
 }
 
 /* ===================== Export / Import ===================== */
@@ -1862,6 +1881,7 @@ document.getElementById('spotify-import-btn').addEventListener('click', openSpot
 document.getElementById('library-btn').addEventListener('click', () => { viewMode = 'library'; renderAll(); });
 
 seedDemoIfEmpty();
+migrateAutoImportedQueueItems();
 renderAll();
 autoImportSpotifySuggestions();
 </script>

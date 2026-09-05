@@ -66,9 +66,9 @@ Griffwerk hat bewusst keinen eigenen Server und kann sich daher nicht selbst bei
 
 ### Automatischer Spotify-Import
 
-Zusätzlich zum manuellen Weg oben pflegt Claude im Hintergrund (ein täglich laufender Routine-Check) die Datei [`data/spotify-suggestions.json`](data/spotify-suggestions.json) im Repo: Songs, die häufig genug gehört werden, zum Musikgeschmack passen und kein Ausreißer sind, landen dort automatisch. Die App ruft diese Datei beim Start selbst per `fetch()` von ihrem eigenen Ursprung ab und übernimmt neue Einträge automatisch in die Warteliste – ganz ohne manuellen Import.
+Zusätzlich zum manuellen Weg oben pflegt Claude im Hintergrund (ein täglich laufender Routine-Check) die Datei [`data/spotify-suggestions.json`](data/spotify-suggestions.json) im Repo: Songs, die häufig genug gehört werden, zum Musikgeschmack passen und kein Ausreißer sind, landen dort automatisch. Die App ruft diese Datei beim Start selbst per `fetch()` von ihrem eigenen Ursprung ab und übernimmt neue Einträge automatisch in die **Vorschläge** – bewusst *nicht* direkt in die Warteliste. So rutscht nichts unkontrolliert in deine Lernliste, nur weil du viel Musik hörst; du entscheidest pro Vorschlag selbst, ob er in die Warteliste soll oder verworfen wird.
 
-Damit das funktioniert, muss die Seite über eine echte URL laufen (z. B. GitHub Pages) statt nur per Doppelklick lokal geöffnet zu werden (`file://` blockiert `fetch()` aus Sicherheitsgründen). Jeder Eintrag wird nur einmal übernommen (stabile ID, im Browser gemerkt) – auch wenn du ihn später wieder aus der Warteliste entfernst, taucht er nicht erneut auf.
+Damit das funktioniert, muss die Seite über eine echte URL laufen (z. B. GitHub Pages) statt nur per Doppelklick lokal geöffnet zu werden (`file://` blockiert `fetch()` aus Sicherheitsgründen). Jeder Eintrag wird nur einmal übernommen (stabile ID, im Browser gemerkt) – auch wenn du ihn später wieder aus den Vorschlägen entfernst, taucht er nicht erneut auf.
 
 Die Roh-Bookkeeping-Datei [`data/spotify-watch-tally.json`](data/spotify-watch-tally.json) hält die laufende Zähl-/Beobachtungshistorie für diesen Hintergrund-Check; sie ist nicht für die App selbst gedacht.
 
