@@ -939,7 +939,7 @@ function songCardHtml(s) {
   const doneTasks = Object.keys(pr.doneTasks).filter(k => k.startsWith(s.id + ':') && pr.doneTasks[k]).length;
   const pct = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
   return `<div class="song-card ${s.id === currentSongId ? 'selected' : ''}" data-id="${s.id}">
-    <div class="title">${escapeHtml(s.title)}</div>
+    <div class="title">${s.favorite ? '★ ' : ''}${escapeHtml(s.title)}</div>
     <div class="artist">${escapeHtml(s.artist || '')}</div>
     <div class="meta-row">
       <span class="badge" style="background:${diff.color}">${formatScore(diff)}</span>
@@ -981,7 +981,9 @@ function renderQueuePanel() {
 
 function renderSongList() {
   const el = document.getElementById('song-list');
-  const learning = songs.filter(s => !s.mastered);
+  const active = songs.filter(s => !s.mastered);
+  const favorites = active.filter(s => s.favorite);
+  const learning = active.filter(s => !s.favorite);
   const mastered = songs.filter(s => s.mastered);
   const group = (title, list) => list.length ? `<div class="sidebar-group-label">${title}</div>${list.map(songCardHtml).join('')}` : '';
 
@@ -991,6 +993,7 @@ function renderSongList() {
   if (!songs.length && !queue.length && !suggestions.length) {
     html = '<div class="empty-state">Noch keine Songs. Leg oben deinen ersten an oder importiere eine Spotify-Playlist.</div>';
   } else {
+    html += group('★ Favoriten', favorites);
     html += group('Am Lernen', learning);
     html += group('Kann ich', mastered);
   }
@@ -1049,6 +1052,7 @@ function renderMain() {
           <div class="song-meta-line">${song.bpm} BPM · Takt ${song.timeSignature || 4}/4 · Capo ${song.capo || 0} · ${TUNINGS[song.tuning || 'standard'].label}${song.spotifyUrl ? ` · <a href="${escapeHtml(song.spotifyUrl)}" target="_blank" rel="noopener">Auf Spotify öffnen</a>` : ''}</div>
         </div>
         <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap;">
+          ${!song.mastered ? `<button class="icon-btn" id="favorite-toggle-btn" title="${song.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}" style="font-size:18px; color:${song.favorite ? 'var(--warn)' : 'var(--ink-soft)'};">${song.favorite ? '★' : '☆'}</button>` : ''}
           <button class="export-btn ${song.mastered ? '' : 'primary'}" id="mastered-toggle-btn">${song.mastered ? '↺ Zurück zu „Am Lernen"' : '✓ Als gelernt markieren'}</button>
           <button class="icon-btn" id="edit-song-btn" title="Bearbeiten">✎</button>
           <button class="icon-btn" id="delete-song-btn" title="Song löschen">✕</button>
@@ -1072,6 +1076,8 @@ function renderMain() {
 
   document.getElementById('edit-song-btn').addEventListener('click', () => openEditor({ existingSong: song }));
   document.getElementById('mastered-toggle-btn').addEventListener('click', () => toggleMastered(song.id));
+  const favBtn = document.getElementById('favorite-toggle-btn');
+  if (favBtn) favBtn.addEventListener('click', () => toggleFavorite(song.id));
 
   document.querySelectorAll('#tabbar .tab-btn').forEach(b => {
     b.addEventListener('click', () => { currentTab = b.dataset.tab; renderTabContent(song, diff); });
@@ -1084,6 +1090,14 @@ function toggleMastered(songId) {
   const s = songs.find(x => x.id === songId);
   if (!s) return;
   s.mastered = !s.mastered;
+  saveSongs();
+  renderAll();
+}
+
+function toggleFavorite(songId) {
+  const s = songs.find(x => x.id === songId);
+  if (!s) return;
+  s.favorite = !s.favorite;
   saveSongs();
   renderAll();
 }
@@ -1370,7 +1384,7 @@ function openEditor(prefill) {
     editorState.prefillTimeSignature = s.timeSignature;
     editorState.prefillTuning = s.tuning;
     const seed = { ...s };
-    delete seed.id; delete seed.mastered;
+    delete seed.id; delete seed.mastered; delete seed.favorite;
     editorState.jsonSeed = JSON.stringify(seed, null, 2);
   } else if (prefill) {
     editorState.prefillTitle = prefill.title || '';
@@ -1534,10 +1548,12 @@ function saveFromEditor() {
     const idx = songs.findIndex(s => s.id === editorState.editingId);
     song.id = editorState.editingId;
     song.mastered = idx !== -1 ? !!songs[idx].mastered : false;
+    song.favorite = idx !== -1 ? !!songs[idx].favorite : false;
     if (idx !== -1) songs[idx] = song; else songs.push(song);
   } else {
     song.id = uid();
     song.mastered = false;
+    song.favorite = false;
     songs.push(song);
     if (editorState.fromQueueId) {
       queue = queue.filter(q => q.id !== editorState.fromQueueId);
@@ -1603,6 +1619,46 @@ function saveSpotifyImport() {
   renderAll();
 }
 
+/* ===================== Automatischer Spotify-Abruf ===================== */
+// Claude pflegt data/spotify-suggestions.json im Repo (taeglicher Hintergrund-Check der
+// Hoergewohnheiten). Beim Laden holt sich die App diese Datei selbst per fetch() vom
+// eigenen Ursprung (funktioniert nur, wenn die Seite ueber eine echte URL wie GitHub
+// Pages laeuft, nicht per file://-Doppelklick) und uebernimmt neue Eintraege automatisch
+// in die Warteliste. Jeder Eintrag wird per stabiler "id" nur einmal uebernommen, auch
+// wenn er spaeter wieder aus der Warteliste geloescht wurde.
+const SEEN_SPOTIFY_IDS_KEY = 'griffwerk.seenSpotifyIds.v1';
+
+function loadSeenSpotifyIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_SPOTIFY_IDS_KEY)) || []); } catch (e) { return new Set(); }
+}
+function saveSeenSpotifyIds(set) { localStorage.setItem(SEEN_SPOTIFY_IDS_KEY, JSON.stringify([...set])); }
+
+async function autoImportSpotifySuggestions() {
+  let data;
+  try {
+    const res = await fetch('./data/spotify-suggestions.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (e) {
+    return; // kein Netz, lokal per file:// geoeffnet, oder Datei existiert (noch) nicht
+  }
+  if (!Array.isArray(data) || !data.length) return;
+
+  const seen = loadSeenSpotifyIds();
+  let added = false;
+  data.forEach(raw => {
+    if (!raw || typeof raw !== 'object' || !raw.id || seen.has(String(raw.id))) return;
+    seen.add(String(raw.id));
+    let stub;
+    try { stub = sanitizeStub(raw); } catch (e) { return; }
+    stub.id = String(raw.id); // stabile ID statt zufaelliger uid(), damit ein erneuter Abruf nicht doppelt einfuegt
+    queue.push(stub);
+    added = true;
+  });
+  saveSeenSpotifyIds(seen);
+  if (added) { saveQueue(); renderAll(); }
+}
+
 /* ===================== Export / Import ===================== */
 
 function exportAll() {
@@ -1626,6 +1682,7 @@ document.getElementById('spotify-import-btn').addEventListener('click', openSpot
 
 seedDemoIfEmpty();
 renderAll();
+autoImportSpotifySuggestions();
 </script>
 </body>
 </html>
