@@ -1,1 +1,22 @@
-[]
+[
+  { "id": "manual:man-in-the-box-alice-in-chains", "title": "Man in the Box", "artist": "Alice In Chains", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:the-trooper-iron-maiden", "title": "The Trooper (2015 Remaster)", "artist": "Iron Maiden", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:the-man-who-sold-the-world-live-nirvana", "title": "The Man Who Sold The World (Live)", "artist": "Nirvana", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:purple-rain-prince", "title": "Purple Rain", "artist": "Prince", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:even-flow-pearl-jam", "title": "Even Flow", "artist": "Pearl Jam", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:master-of-puppets-metallica", "title": "Master Of Puppets", "artist": "Metallica", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:paranoid-black-sabbath", "title": "Paranoid (2012 Remaster)", "artist": "Black Sabbath", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:we-die-young-alice-in-chains", "title": "We Die Young", "artist": "Alice In Chains", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:should-i-stay-or-should-i-go-the-clash", "title": "Should I Stay or Should I Go (Remastered)", "artist": "The Clash", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:everlong-foo-fighters", "title": "Everlong", "artist": "Foo Fighters", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:simple-man-deftones", "title": "Simple Man (2005 Remaster)", "artist": "Deftones", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:entombed-deftones", "title": "Entombed", "artist": "Deftones", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:into-the-void-black-sabbath", "title": "Into the Void (2009 Remaster)", "artist": "Black Sabbath", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:social-parasite-demo-alice-in-chains", "title": "Social Parasite (Demo)", "artist": "Alice In Chains", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:go-with-the-flow-queens-of-the-stone-age", "title": "Go With The Flow", "artist": "Queens of the Stone Age", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:no-more-tears-ozzy-osbourne", "title": "No More Tears", "artist": "Ozzy Osbourne", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:black-pearl-jam", "title": "Black", "artist": "Pearl Jam", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:nib-black-sabbath", "title": "N.I.B. (2009 Remaster)", "artist": "Black Sabbath", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:black-hole-sun-soundgarden", "title": "Black Hole Sun", "artist": "Soundgarden", "reason": "Aus deiner Gitarre-Playlist" },
+  { "id": "manual:smells-like-teen-spirit-nirvana", "title": "Smells Like Teen Spirit", "artist": "Nirvana", "reason": "Aus deiner Gitarre-Playlist" }
+]
