@@ -201,6 +201,38 @@
   .stat-box .n { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; }
   .stat-box .l { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
 
+  /* Bibliothek: filterbare Gesamtliste */
+  .library-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  .library-filters input, .library-filters select {
+    font-family: 'Inter', sans-serif; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line);
+    border-radius: 3px; background: #fff; color: var(--ink);
+  }
+  .library-filters input { flex: 1; min-width: 180px; }
+  .lib-table { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+  .lib-row {
+    display: grid; grid-template-columns: 1fr 130px 90px 60px 110px; gap: 10px; align-items: center;
+    padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13.5px;
+  }
+  .lib-row:last-child { border-bottom: none; }
+  .lib-row:not(.lib-head) { cursor: pointer; }
+  .lib-row:not(.lib-head):hover { background: var(--paper); }
+  .lib-head {
+    background: var(--paper); font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--ink-soft);
+  }
+  .lib-title-cell { display: flex; flex-direction: column; }
+  .lib-title { font-family: 'Fraunces', serif; font-weight: 600; }
+  .lib-artist { font-size: 12px; color: var(--ink-soft); }
+  .lib-score, .lib-bpm { font-family: 'JetBrains Mono', monospace; }
+  .lib-action { font-size: 12px; color: var(--accent); text-align: right; white-space: nowrap; }
+
+  @media (max-width: 760px) {
+    .lib-row { grid-template-columns: 1fr; gap: 4px; }
+    .lib-row.lib-head { display: none; }
+    .lib-score::before { content: 'Schwierigkeit: '; color: var(--ink-soft); }
+    .lib-bpm::before { content: 'BPM: '; color: var(--ink-soft); }
+  }
+
   /* Griffbild table: top row = strings thick(left)->thin(right), bottom row = x or fret number */
   .griff {
     display: inline-block;
@@ -339,7 +371,8 @@
   <div class="layout">
     <div class="sidebar">
       <button class="new-song-btn" id="new-song-btn">+ Neuer Song</button>
-      <button class="export-btn" id="spotify-import-btn" style="width:100%; margin-bottom:16px;">+ Von Spotify importieren</button>
+      <button class="export-btn" id="spotify-import-btn" style="width:100%; margin-bottom:10px;">+ Von Spotify importieren</button>
+      <button class="export-btn" id="library-btn" style="width:100%; margin-bottom:16px;">📚 Bibliothek (filtern/sortieren)</button>
       <div id="song-list"></div>
     </div>
     <div class="main-col" id="main-col"></div>
@@ -876,6 +909,8 @@ let currentSongId = songs[0] ? songs[0].id : null;
 let currentTab = 'overview';
 let practicePlan = null; // gecachter Lernplan fuer aktuellen Song
 let practiceDayIdx = 0;
+let viewMode = 'song'; // 'song' = Detailansicht, 'library' = filterbare Gesamtliste
+let libraryFilter = { search: '', status: 'all', difficulty: 'all', sort: 'title' };
 
 let metronome = { running: false, bpm: 100, audioCtx: null, nextTime: 0, timerId: null, beatCount: 0 };
 let stopwatch = { running: false, startedAt: null, elapsedBefore: 0, timerId: null };
@@ -1000,7 +1035,7 @@ function renderSongList() {
   el.innerHTML = html;
 
   el.querySelectorAll('.song-card').forEach(card => {
-    card.addEventListener('click', () => { currentSongId = card.dataset.id; currentTab = 'overview'; renderAll(); });
+    card.addEventListener('click', () => { currentSongId = card.dataset.id; currentTab = 'overview'; viewMode = 'song'; renderAll(); });
   });
   el.querySelectorAll('.q-transcribe').forEach(btn => btn.addEventListener('click', () => {
     const q = queue.find(x => x.id === btn.dataset.id);
@@ -1026,12 +1061,156 @@ function renderSongList() {
   }));
 }
 
+/* ===================== Bibliothek: filterbare Gesamtliste ===================== */
+
+const STATUS_META = {
+  favorite:   { label: '★ Favorit',  color: 'var(--warn)' },
+  learning:   { label: 'Am Lernen',  color: 'var(--accent)' },
+  mastered:   { label: 'Kann ich',   color: 'var(--good)' },
+  queue:      { label: 'Warteliste', color: 'var(--ink-soft)' },
+  suggestion: { label: 'Vorschlag',  color: 'var(--ink-soft)' },
+};
+
+const DIFFICULTY_BUCKETS = [
+  ['anfaenger', 'Anfänger (0–20)'],
+  ['leicht', 'Leicht-Fortgeschritten (21–40)'],
+  ['mittel', 'Mittel (41–60)'],
+  ['fortgeschritten', 'Fortgeschritten (61–80)'],
+  ['experte', 'Experte (81–100)'],
+  ['unbekannt', 'Noch nicht transkribiert'],
+];
+
+function difficultyBucket(score) {
+  if (score <= 20) return 'anfaenger';
+  if (score <= 40) return 'leicht';
+  if (score <= 60) return 'mittel';
+  if (score <= 80) return 'fortgeschritten';
+  return 'experte';
+}
+
+function libraryRows() {
+  const rows = [];
+  songs.forEach(s => {
+    const diff = computeDifficulty(s, knownChordSet);
+    const status = s.mastered ? 'mastered' : s.favorite ? 'favorite' : 'learning';
+    rows.push({
+      kind: 'song', id: s.id, title: s.title, artist: s.artist || '', status,
+      score: diff.score, personalScore: diff.personalScore, bpm: s.bpm,
+    });
+  });
+  queue.forEach(q => rows.push({ kind: 'queue', id: q.id, title: q.title, artist: q.artist || '', status: 'queue', score: null, bpm: null }));
+  suggestions.forEach(s => rows.push({ kind: 'suggestion', id: s.id, title: s.title, artist: s.artist || '', status: 'suggestion', score: null, bpm: null, reason: s.reason }));
+  return rows;
+}
+
+function libraryRowHtml(r) {
+  const meta = STATUS_META[r.status];
+  const scoreText = r.score == null ? '–' : (r.personalScore != null && r.personalScore !== r.score ? `${r.score} (${r.personalScore})` : String(r.score));
+  const actionLabel = r.kind === 'song' ? 'Öffnen ▸' : r.kind === 'queue' ? 'Transkribieren' : '+ Warteliste';
+  return `<div class="lib-row" data-kind="${r.kind}" data-id="${escapeHtml(r.id)}">
+    <span class="lib-title-cell">
+      <span class="lib-title">${escapeHtml(r.title)}</span>
+      <span class="lib-artist">${escapeHtml(r.artist)}</span>
+      ${r.reason ? `<span class="reason">${escapeHtml(r.reason)}</span>` : ''}
+    </span>
+    <span><span class="badge" style="background:${meta.color};">${meta.label}</span></span>
+    <span class="lib-score">${scoreText}</span>
+    <span class="lib-bpm">${r.bpm || '–'}</span>
+    <span class="lib-action">${actionLabel}</span>
+  </div>`;
+}
+
+function renderLibrary(el) {
+  let rows = libraryRows();
+
+  const search = libraryFilter.search.trim().toLowerCase();
+  if (search) rows = rows.filter(r => r.title.toLowerCase().includes(search) || r.artist.toLowerCase().includes(search));
+  if (libraryFilter.status !== 'all') rows = rows.filter(r => r.status === libraryFilter.status);
+  if (libraryFilter.difficulty !== 'all') {
+    rows = rows.filter(r => (r.score == null ? 'unbekannt' : difficultyBucket(r.score)) === libraryFilter.difficulty);
+  }
+
+  const sortFns = {
+    title: (a, b) => a.title.localeCompare(b.title, 'de'),
+    artist: (a, b) => a.artist.localeCompare(b.artist, 'de'),
+    diffAsc: (a, b) => (a.score ?? -1) - (b.score ?? -1),
+    diffDesc: (a, b) => (b.score ?? -1) - (a.score ?? -1),
+  };
+  rows.sort(sortFns[libraryFilter.sort] || sortFns.title);
+
+  el.innerHTML = `
+    <div class="panel">
+      <div class="song-head">
+        <h2 style="font-family:'Fraunces',serif; font-size:24px; margin:0;">Bibliothek</h2>
+      </div>
+      <div class="library-filters">
+        <input type="text" id="lib-search" placeholder="Titel oder Interpret suchen…" value="${escapeHtml(libraryFilter.search)}">
+        <select id="lib-status-filter">
+          <option value="all">Alle Status</option>
+          <option value="favorite">★ Favoriten</option>
+          <option value="learning">Am Lernen</option>
+          <option value="mastered">Kann ich</option>
+          <option value="queue">Warteliste</option>
+          <option value="suggestion">Vorschläge</option>
+        </select>
+        <select id="lib-difficulty-filter">
+          <option value="all">Alle Schwierigkeiten</option>
+          ${DIFFICULTY_BUCKETS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select>
+        <select id="lib-sort">
+          <option value="title">Titel A-Z</option>
+          <option value="artist">Interpret A-Z</option>
+          <option value="diffAsc">Schwierigkeit aufsteigend</option>
+          <option value="diffDesc">Schwierigkeit absteigend</option>
+        </select>
+      </div>
+      <div class="lib-table">
+        <div class="lib-row lib-head">
+          <span>Titel / Interpret</span><span>Status</span><span>Schwierigkeit</span><span>BPM</span><span></span>
+        </div>
+        ${rows.length ? rows.map(libraryRowHtml).join('') : '<div class="note" style="padding:16px;">Keine Songs passen zu diesen Filtern.</div>'}
+      </div>
+      <div class="note" style="margin-top:14px;">Status-Farben: <span class="badge" style="background:var(--warn);">★ Favorit</span> <span class="badge" style="background:var(--accent);">Am Lernen</span> <span class="badge" style="background:var(--good);">Kann ich</span> <span class="badge" style="background:var(--ink-soft);">Warteliste/Vorschlag</span></div>
+    </div>
+  `;
+
+  document.getElementById('lib-status-filter').value = libraryFilter.status;
+  document.getElementById('lib-difficulty-filter').value = libraryFilter.difficulty;
+  document.getElementById('lib-sort').value = libraryFilter.sort;
+
+  document.getElementById('lib-search').addEventListener('input', e => { libraryFilter.search = e.target.value; renderLibrary(el); });
+  document.getElementById('lib-status-filter').addEventListener('change', e => { libraryFilter.status = e.target.value; renderLibrary(el); });
+  document.getElementById('lib-difficulty-filter').addEventListener('change', e => { libraryFilter.difficulty = e.target.value; renderLibrary(el); });
+  document.getElementById('lib-sort').addEventListener('change', e => { libraryFilter.sort = e.target.value; renderLibrary(el); });
+
+  el.querySelectorAll('.lib-row[data-kind]').forEach(row => {
+    row.addEventListener('click', () => {
+      const kind = row.dataset.kind, id = row.dataset.id;
+      if (kind === 'song') {
+        currentSongId = id; currentTab = 'overview'; viewMode = 'song';
+        renderAll();
+      } else if (kind === 'queue') {
+        const q = queue.find(x => x.id === id);
+        if (q) openEditor({ title: q.title, artist: q.artist, spotifyUrl: q.spotifyUrl, fromQueueId: q.id });
+      } else if (kind === 'suggestion') {
+        const s = suggestions.find(x => x.id === id);
+        if (!s) return;
+        queue.push({ id: uid(), title: s.title, artist: s.artist, spotifyUrl: s.spotifyUrl });
+        suggestions = suggestions.filter(x => x.id !== s.id);
+        saveQueue(); saveSuggestions();
+        renderAll();
+      }
+    });
+  });
+}
+
 /* ===================== Rendering: Hauptbereich ===================== */
 
 function currentSong() { return songs.find(s => s.id === currentSongId); }
 
 function renderMain() {
   const main = document.getElementById('main-col');
+  if (viewMode === 'library') { renderLibrary(main); return; }
   const song = currentSong();
   if (!song) {
     main.innerHTML = '<div class="empty-state">Wähle links einen Song aus oder lege einen neuen an, um Griffbilder, Noten, Schwierigkeit und Lernplan zu sehen.</div>';
@@ -1563,6 +1742,7 @@ function saveFromEditor() {
   saveSongs();
   currentSongId = song.id;
   currentTab = 'overview';
+  viewMode = 'song';
   closeEditor();
   renderAll();
 }
@@ -1679,6 +1859,7 @@ function renderAll() {
 
 document.getElementById('new-song-btn').addEventListener('click', () => openEditor());
 document.getElementById('spotify-import-btn').addEventListener('click', openSpotifyImport);
+document.getElementById('library-btn').addEventListener('click', () => { viewMode = 'library'; renderAll(); });
 
 seedDemoIfEmpty();
 renderAll();
