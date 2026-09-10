@@ -30,3 +30,17 @@ match any").
 Ressourcen (Google Fonts, VexFlow) sind in manchen Sandbox-Umgebungen ohne
 Internetzugang nicht ladbar; das ist kein echter Bug, nur eine
 Sandbox-Einschränkung.
+
+## Zusammenspiel mit claude.ai-Projects (Chat/Cowork)
+
+Dieses Repo ist im claude.ai-Project "Kleine Anwendungen" als Kontext verknüpft.
+Das Project liest dadurch automatisch den aktuellen Repo-Stand (Commits, Dateien,
+auch diese Datei) — es gibt aber keinen Weg zurück: was im Project-Chat besprochen
+wird, landet nicht automatisch hier.
+
+Deshalb: tatsächliche Arbeitsanweisungen ("bau X", "ändere Y") nur hier im
+Code-Bereich geben, nicht parallel im Project-Chat, damit nicht zwei Stellen
+unabhängig voneinander am selben Code arbeiten. Wurde im Project-Chat trotzdem
+etwas entschieden, das den Code betreffen soll, wird es zuerst hier (in dieser
+Datei oder direkt in der nächsten Anweisung) festgehalten, bevor daran
+gearbeitet wird.
