@@ -472,6 +472,7 @@ function sanitizeSongData(raw) {
     title: String(raw.title).slice(0, 120),
     artist: String(raw.artist || '').slice(0, 120),
     notes: String(raw.notes || '').slice(0, 500),
+    ampSettings: String(raw.ampSettings || '').slice(0, 300),
     bpm, capo, timeSignature, tuning,
     progression,
   };
@@ -834,6 +835,7 @@ function demoAmazingGrace() {
     id: uid(), title: 'Amazing Grace', artist: 'Traditional (Public Domain)',
     bpm: 76, capo: 0, tuning: 'standard', timeSignature: 4,
     notes: 'Eigene, vereinfachte Beispiel-Begleitung eines traditionellen, gemeinfreien Kirchenlieds – ideal zum Einstieg in Akkordwechsel.',
+    ampSettings: 'Clean-Kanal, wenig Hall, warmer Ton (Hals-Pickup) – passt zum ruhigen Charakter des Lieds.',
     progression: prog,
   };
 }
@@ -971,6 +973,7 @@ function renderOverviewTab(el, song, diff) {
       <div class="stat-box"><div class="n">${diff.changesPerMinute}</div><div class="l">Wechsel/Min</div></div>
       <div class="stat-box"><div class="n">${plan.length}</div><div class="l">Übungstage geplant</div></div>
     </div>
+    ${song.ampSettings ? `<div class="note" style="margin-top:16px;"><strong>Amp-Einstellung:</strong> ${escapeHtml(song.ampSettings)}</div>` : ''}
     ${song.notes ? `<div class="note" style="margin-top:16px;">${escapeHtml(song.notes)}</div>` : ''}
   `;
 }
@@ -1251,6 +1254,7 @@ function renderManualEditor() {
       <div class="field"><span>Stimmung</span>
         <select id="f-tuning">${Object.entries(TUNINGS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select>
       </div>
+      <div class="field" style="grid-column:1/-1;"><span>Empfohlene Amp-Einstellung (optional)</span><input id="f-amp" placeholder="z. B. Clean, wenig Hall, Bridge-Pickup"></div>
     </div>
     <div class="section-label" style="margin-top:0;">Akkordfolge</div>
     <div class="prog-row prog-head">
@@ -1324,6 +1328,7 @@ function saveFromEditor() {
       capo: document.getElementById('f-capo').value,
       timeSignature: document.getElementById('f-time').value,
       tuning: document.getElementById('f-tuning').value,
+      ampSettings: document.getElementById('f-amp').value.trim(),
       progression: editorState.entries,
     };
   }

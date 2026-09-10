@@ -30,6 +30,7 @@ Eine automatische Erkennung "Song rein, Griffe raus" per Audioanalyse ist mit ei
   "timeSignature": 4,
   "tuning": "standard",
   "notes": "Freier Hinweistext, optional",
+  "ampSettings": "Empfohlene Amp-Einstellung, optional, z. B. 'Clean, leichter Hall, Steg-Pickup'",
   "progression": [
     {
       "section": "Strophe",
