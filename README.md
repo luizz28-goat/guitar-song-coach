@@ -47,6 +47,7 @@ Eine automatische Erkennung "Song rein, Griffe raus" per Audioanalyse ist mit ei
 - `beats`: Länge in Viertelschlägen – erlaubt sind `4` (ganze), `2` (halbe), `1` (viertel), `0.5` (achtel), `0.25` (sechzehntel).
 - `technique`: eine von `strum`, `zupfen`, `einzelton`, `hammer-on`, `pull-off`, `slide`, `bend`, `palm-mute`.
 - `tuning`: `"standard"` (E A D G B E) oder `"dropD"`.
+- `barre` (optional): `true`, wenn der Griff als Barré markiert werden soll.
 - Für Melodien/Riffs: einfach pro Ton einen Eintrag mit nur einer belegten Saite in `shape` anlegen.
 
 Alle importierten Daten werden beim Speichern validiert (Zahlenbereiche, erlaubte Werte) – ungültige oder unerwartete Felder werden abgewiesen bzw. auf sichere Standardwerte zurückgesetzt.

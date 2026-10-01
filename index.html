@@ -322,6 +322,7 @@
     <div class="sidebar">
       <button class="new-song-btn" id="new-song-btn">+ Neuer Song</button>
       <div id="song-list"></div>
+      <button class="export-btn" id="export-all-btn" style="width:100%; margin-top:6px;">Alle Songs exportieren (JSON)</button>
     </div>
     <div class="main-col" id="main-col"></div>
   </div>
@@ -805,8 +806,8 @@ let currentTab = 'overview';
 let practicePlan = null; // gecachter Lernplan fuer aktuellen Song
 let practiceDayIdx = 0;
 
-let metronome = { running: false, bpm: 100, audioCtx: null, nextTime: 0, timerId: null, beatCount: 0 };
-let stopwatch = { running: false, startedAt: null, elapsedBefore: 0, timerId: null };
+let metronome = { running: false, bpm: 100, beatsPerBar: 4, audioCtx: null, nextTime: 0, timerId: null, beatCount: 0 };
+let stopwatch = { running: false, songId: null, dayIdx: 0, startedAt: null, elapsedBefore: 0, timerId: null };
 
 /* Demo-Songs beim ersten Start laden */
 function seedDemoIfEmpty() {
@@ -1047,17 +1048,17 @@ function renderPracticeTab(el, song, diff) {
 
     <div class="clock-card">
       <div>
-        <div class="clock-status" id="sw-status">Bereit</div>
+        <div class="clock-status" id="sw-status">${stopwatch.running ? 'Übe gerade …' : 'Bereit'}</div>
         <div class="clock-display" id="sw-display">00:00:00</div>
       </div>
-      <button class="stamp" id="sw-toggle">Start</button>
+      <button class="stamp${stopwatch.running ? ' running' : ''}" id="sw-toggle">${stopwatch.running ? 'Stop' : 'Start'}</button>
     </div>
 
     <div class="section-label">Metronom</div>
     <div class="metro-row">
-      <button class="stamp" id="metro-toggle">▶︎ Start</button>
-      <input type="range" id="metro-slider" min="30" max="220" value="${song.bpm}">
-      <span class="metro-bpm" id="metro-bpm-display">${song.bpm} BPM</span>
+      <button class="stamp${metronome.running ? ' running' : ''}" id="metro-toggle">${metronome.running ? '■ Stop' : '▶︎ Start'}</button>
+      <input type="range" id="metro-slider" min="30" max="220" value="${metronome.running ? metronome.bpm : song.bpm}">
+      <span class="metro-bpm" id="metro-bpm-display">${metronome.running ? metronome.bpm : song.bpm} BPM</span>
     </div>
 
     <div class="section-label">Fokus-Griffe für heute</div>
@@ -1085,7 +1086,10 @@ function renderPracticeTab(el, song, diff) {
     });
   });
 
-  metronome.bpm = song.bpm;
+  if (!metronome.running) {
+    metronome.bpm = song.bpm;
+    metronome.beatsPerBar = song.timeSignature || 4;
+  }
   document.getElementById('metro-slider').addEventListener('input', e => {
     metronome.bpm = Number(e.target.value);
     document.getElementById('metro-bpm-display').textContent = metronome.bpm + ' BPM';
@@ -1130,7 +1134,7 @@ function metronomeScheduler() {
   if (!metronome.running) return;
   const ctx = metronome.audioCtx;
   while (metronome.nextTime < ctx.currentTime + 0.1) {
-    playClick(ctx, metronome.nextTime, metronome.beatCount % 4 === 0);
+    playClick(ctx, metronome.nextTime, metronome.beatCount % (metronome.beatsPerBar || 4) === 0);
     metronome.nextTime += 60 / metronome.bpm;
     metronome.beatCount++;
   }
@@ -1156,6 +1160,9 @@ function toggleStopwatch(songId, dayIdx) {
     stopwatch.running = false;
     clearInterval(stopwatch.timerId);
     const elapsed = stopwatch.elapsedBefore + (Date.now() - stopwatch.startedAt) / 1000;
+    // Zeit dem Song/Tag gutschreiben, für den gestartet wurde (nicht dem gerade angezeigten)
+    songId = stopwatch.songId || songId;
+    dayIdx = stopwatch.dayIdx;
     const pr = progressFor(songId);
     const key = 'day' + dayIdx + '-' + Date.now();
     pr.sessions[key] = elapsed;
@@ -1168,6 +1175,8 @@ function toggleStopwatch(songId, dayIdx) {
     return;
   }
   stopwatch.running = true;
+  stopwatch.songId = songId;
+  stopwatch.dayIdx = dayIdx;
   stopwatch.startedAt = Date.now();
   btn.textContent = 'Stop'; btn.classList.add('running');
   statusEl.textContent = 'Übe gerade …';
@@ -1350,6 +1359,7 @@ function exportAll() {
   a.href = URL.createObjectURL(blob);
   a.download = 'griffwerk-export.json';
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 /* ===================== Init ===================== */
@@ -1360,6 +1370,7 @@ function renderAll() {
 }
 
 document.getElementById('new-song-btn').addEventListener('click', openEditor);
+document.getElementById('export-all-btn').addEventListener('click', exportAll);
 
 seedDemoIfEmpty();
 renderAll();
